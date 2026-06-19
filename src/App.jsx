@@ -68,6 +68,23 @@ function formatarKg(valor) {
   })} kg`;
 }
 
+function formatarResponsavel(valor) {
+  const mapa = {
+    beto: "Beto",
+    mano: "Mano",
+    ambos: "Beto e Mano",
+  };
+  return mapa[valor] || "—";
+}
+
+function formatarStatusEvento(valor) {
+  const mapa = {
+    orcamento: "Orçamento",
+    data_fechada: "Data fechada",
+  };
+  return mapa[valor] || "Orçamento";
+}
+
 function mascaraTelefone(valor) {
   const numeros = valor.replace(/\D/g, "").slice(0, 11);
   if (numeros.length <= 2) return numeros;
@@ -76,7 +93,7 @@ function mascaraTelefone(valor) {
   return numeros.replace(/^(\d{2})(\d{5})(\d{4})/, "($1) $2-$3");
 }
 
-function calcularOrcamento({ nome, telefone, dataEvento, pessoas, tipoServico }) {
+function calcularOrcamento({ nome, telefone, dataEvento, pessoas, tipoServico, responsavel = "beto", statusEvento = "orcamento" }) {
   const quantidadePessoas = Number(pessoas);
   const comEntrada = tipoServico === "com_entrada";
   const carnePorPessoaGramas = comEntrada ? 400 : 300;
@@ -92,6 +109,8 @@ function calcularOrcamento({ nome, telefone, dataEvento, pessoas, tipoServico })
     pessoas: quantidadePessoas,
     tipoServico,
     tipoServicoTexto: comEntrada ? "Com entrada" : "Sem entrada",
+    responsavel,
+    statusEvento,
     carnePorPessoaGramas,
     quantidadeTotalCarneKg,
     quantidadeChurrasqueiros,
@@ -203,32 +222,33 @@ async function montarPDF(orcamento, logoUsuarioDataUrl) {
   linha("WhatsApp", orcamento.telefone || "Não informado", 24, 128, largura - 48);
   linha("Data do evento", formatarData(orcamento.dataEvento), 24, 140, largura - 48);
 
-  card(14, 152, largura - 28, 64);
+  card(14, 152, largura - 28, 82);
   tituloSecao("DADOS DO EVENTO", 24, 166);
   linha("Pessoas", `${orcamento.pessoas} pessoas`, 24, 178, largura - 48);
-  linha("Tipo de serviço", `${orcamento.tipoServicoTexto} (${orcamento.carnePorPessoaGramas}g por pessoa)`, 24, 190, largura - 48);
-  linha("Carne total", formatarKg(orcamento.quantidadeTotalCarneKg), 24, 202, largura - 48);
-  linha("Churrasqueiros", `${orcamento.quantidadeChurrasqueiros} churrasqueiro${orcamento.quantidadeChurrasqueiros > 1 ? "s" : ""}`, 24, 214, largura - 48);
+  linha("Responsável", formatarResponsavel(orcamento.responsavel), 24, 190, largura - 48);
+  linha("Status", formatarStatusEvento(orcamento.statusEvento), 24, 202, largura - 48);
+  linha("Tipo de serviço", `${orcamento.tipoServicoTexto} (${orcamento.carnePorPessoaGramas}g por pessoa)`, 24, 214, largura - 48);
+  linha("Carne total", formatarKg(orcamento.quantidadeTotalCarneKg), 24, 226, largura - 48);
 
-  card(14, 226, largura - 28, 28);
-  tituloSecao("INFORMAÇÕES DO ORÇAMENTO", 24, 240);
-  linha("Valor por churrasqueiro", formatarMoeda(orcamento.valorBaseChurrasqueiro), 24, 252, largura - 48);
+  card(14, 242, largura - 28, 28);
+  tituloSecao("INFORMAÇÕES DO ORÇAMENTO", 24, 256);
+  linha("Churrasqueiros / valor", `${orcamento.quantidadeChurrasqueiros} churrasqueiro${orcamento.quantidadeChurrasqueiros > 1 ? "s" : ""} • ${formatarMoeda(orcamento.valorBaseChurrasqueiro)} cada`, 24, 268, largura - 48);
 
   doc.setFillColor(116, 28, 18);
-  doc.roundedRect(14, 264, largura - 28, 24, 5, 5, "F");
+  doc.roundedRect(14, 278, largura - 28, 16, 5, 5, "F");
   doc.setDrawColor(202, 158, 66);
   doc.setLineWidth(0.45);
-  doc.roundedRect(14, 264, largura - 28, 24, 5, 5, "S");
+  doc.roundedRect(14, 278, largura - 28, 16, 5, 5, "S");
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(9.5);
+  doc.setFontSize(8.5);
   doc.setTextColor(245, 245, 245);
-  doc.text("VALOR FINAL", 24, 279);
+  doc.text("VALOR FINAL", 24, 288);
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(22);
+  doc.setFontSize(18);
   doc.setTextColor(238, 198, 94);
-  doc.text(formatarMoeda(orcamento.valorTotal), largura - 24, 280, { align: "right" });
+  doc.text(formatarMoeda(orcamento.valorTotal), largura - 24, 289, { align: "right" });
 
   doc.setFillColor(5, 5, 5);
   doc.rect(0, altura - 8, largura, 8, "F");
@@ -462,6 +482,8 @@ export default function App() {
   const [dataEvento, setDataEvento] = useState("");
   const [pessoas, setPessoas] = useState("");
   const [tipoServico, setTipoServico] = useState("com_entrada");
+  const [responsavel, setResponsavel] = useState("beto");
+  const [statusEvento, setStatusEvento] = useState("orcamento");
   const [orcamentoAtual, setOrcamentoAtual] = useState(null);
   const [clienteSelecionado, setClienteSelecionado] = useState(null);
   const [mensagem, setMensagem] = useState("");
@@ -500,6 +522,8 @@ export default function App() {
       dataEvento,
       pessoas: qtd,
       tipoServico,
+      responsavel,
+      statusEvento,
     });
   }, [nome, telefone, dataEvento, pessoas, tipoServico]);
 
@@ -509,6 +533,8 @@ export default function App() {
     setDataEvento("");
     setPessoas("");
     setTipoServico("com_entrada");
+    setResponsavel("beto");
+    setStatusEvento("orcamento");
   }
 
   async function gerarOrcamento(evento) {
@@ -519,7 +545,7 @@ export default function App() {
     if (!dataEvento) return setMensagem("Informe a data do evento.");
     if (!Number(pessoas) || Number(pessoas) < 1) return setMensagem("Informe a quantidade de pessoas.");
 
-    const novoOrcamento = calcularOrcamento({ nome, telefone, dataEvento, pessoas, tipoServico });
+    const novoOrcamento = calcularOrcamento({ nome, telefone, dataEvento, pessoas, tipoServico, responsavel, statusEvento });
     let orcamentoComPDF = novoOrcamento;
 
     try {
@@ -709,6 +735,57 @@ export default function App() {
                       </div>
                     </Field>
 
+                    <Field label="Churrasqueiro responsável" icon={ChefHat}>
+                      <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-3">
+                        {[
+                          { id: "beto", label: "Beto" },
+                          { id: "mano", label: "Mano" },
+                          { id: "ambos", label: "Beto e Mano" },
+                        ].map((item) => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => setResponsavel(item.id)}
+                            className={cn(
+                              "w-full rounded-2xl border p-4 text-left transition duration-300",
+                              responsavel === item.id
+                                ? "border-[#a17423] bg-[#a17423]/18 shadow-[0_0_1.4rem_rgba(161,116,35,0.16)]"
+                                : "border-white/10 bg-black/25 hover:border-[#a17423]/50"
+                            )}
+                          >
+                            <span className="flex items-center gap-2 text-base font-black text-white">
+                              <CheckCircle2 className="w-5 text-[#ca9e42]" /> {item.label}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </Field>
+
+                    <Field label="Status do evento" icon={ClipboardList}>
+                      <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
+                        {[
+                          { id: "orcamento", label: "Orçamento" },
+                          { id: "data_fechada", label: "Data fechada" },
+                        ].map((item) => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => setStatusEvento(item.id)}
+                            className={cn(
+                              "w-full rounded-2xl border p-4 text-left transition duration-300",
+                              statusEvento === item.id
+                                ? "border-[#a17423] bg-[#a17423]/18 shadow-[0_0_1.4rem_rgba(161,116,35,0.16)]"
+                                : "border-white/10 bg-black/25 hover:border-[#a17423]/50"
+                            )}
+                          >
+                            <span className="flex items-center gap-2 text-base font-black text-white">
+                              <CheckCircle2 className="w-5 text-[#ca9e42]" /> {item.label}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </Field>
+
                     {previaCalculo && <PreviewCalculo previa={previaCalculo} />}
 
                     <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
@@ -798,6 +875,8 @@ function OrcamentoResultado({ orcamento, onPDF, onWhatsApp, gerandoPDF, enviando
       <div className="grid w-full grid-cols-1 gap-1">
         <LinhaResumo icon={Phone} label="WhatsApp" valor={orcamento.telefone || "—"} />
         <LinhaResumo icon={Users} label="Pessoas" valor={`${orcamento.pessoas} pessoas`} />
+        <LinhaResumo icon={ChefHat} label="Responsável" valor={formatarResponsavel(orcamento.responsavel)} />
+        <LinhaResumo icon={ClipboardList} label="Status" valor={formatarStatusEvento(orcamento.statusEvento)} />
         <LinhaResumo icon={Beef} label="Tipo" valor={`${orcamento.tipoServicoTexto} (${orcamento.carnePorPessoaGramas}g)`} />
         <LinhaResumo icon={Beef} label="Carne total" valor={formatarKg(orcamento.quantidadeTotalCarneKg)} />
         <LinhaResumo icon={ChefHat} label="Churrasqueiros" valor={`${orcamento.quantidadeChurrasqueiros} churrasqueiro${orcamento.quantidadeChurrasqueiros > 1 ? "s" : ""}`} />
@@ -860,6 +939,17 @@ function AgendaLista({ agenda, onVisualizar, onExcluir }) {
                 <p className="mt-1 flex items-center gap-2 text-sm text-stone-400">
                   <CalendarDays className="w-4" /> {formatarData(cliente.dataEvento)}
                 </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <span className="rounded-full bg-[#a17423]/15 px-3 py-1 text-xs font-black uppercase tracking-wide text-[#ca9e42]">
+                    {formatarResponsavel(cliente.responsavel)}
+                  </span>
+                  <span className={cn(
+                    "rounded-full px-3 py-1 text-xs font-black uppercase tracking-wide",
+                    cliente.statusEvento === "data_fechada" ? "bg-green-500/15 text-green-300" : "bg-white/10 text-stone-300"
+                  )}>
+                    {formatarStatusEvento(cliente.statusEvento)}
+                  </span>
+                </div>
               </div>
               <div className="rounded-2xl bg-[#a17423]/10 p-3 text-[#ca9e42]">
                 <ChefHat className="w-5" />
@@ -917,6 +1007,8 @@ function ClienteDetalhes({ cliente, onVoltar, onExcluir, onPDF, onWhatsApp, gera
           <LinhaResumo icon={Phone} label="WhatsApp" valor={cliente.telefone || "—"} />
           <LinhaResumo icon={CalendarDays} label="Data" valor={formatarData(cliente.dataEvento)} />
           <LinhaResumo icon={Users} label="Pessoas" valor={`${cliente.pessoas} pessoas`} />
+          <LinhaResumo icon={ChefHat} label="Responsável" valor={formatarResponsavel(cliente.responsavel)} />
+          <LinhaResumo icon={ClipboardList} label="Status" valor={formatarStatusEvento(cliente.statusEvento)} />
           <LinhaResumo icon={Beef} label="Tipo" valor={cliente.tipoServicoTexto} />
           <LinhaResumo icon={Beef} label="Carne total" valor={formatarKg(cliente.quantidadeTotalCarneKg)} />
           <LinhaResumo icon={ChefHat} label="Churrasqueiros" valor={`${cliente.quantidadeChurrasqueiros} churrasqueiro${cliente.quantidadeChurrasqueiros > 1 ? "s" : ""}`} />

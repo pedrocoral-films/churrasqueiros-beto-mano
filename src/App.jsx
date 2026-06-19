@@ -7,6 +7,7 @@ import {
   ChefHat,
   CheckCircle2,
   ClipboardList,
+  Cloud,
   Download,
   Eye,
   FileText,
@@ -15,13 +16,16 @@ import {
   Phone,
   Pencil,
   Save,
+  RefreshCcw,
   Sparkles,
   Trash2,
   Users,
   Wallet,
+  WifiOff,
   X,
 } from "lucide-react";
 import LOGO_URL from "./assets/logo-beto-e-mano.png";
+import { supabase, isSupabaseConfigured, APP_ACCESS_KEY } from "./supabaseClient";
 
 const STORAGE_KEY = "app_churrasqueiros_agenda";
 const LOGO_KEY = "app_churrasqueiros_logo";
@@ -119,6 +123,51 @@ function calcularOrcamento({ nome, telefone, dataEvento, pessoas, tipoServico, r
     valorBaseChurrasqueiro: VALOR_BASE_CHURRASQUEIRO,
     valorTotal,
     criadoEm: new Date().toISOString(),
+  };
+}
+
+function orcamentoParaLinha(orcamento) {
+  return {
+    access_key: APP_ACCESS_KEY,
+    nome: orcamento.nome,
+    telefone: orcamento.telefone,
+    data_evento: orcamento.dataEvento,
+    pessoas: orcamento.pessoas,
+    tipo_servico: orcamento.tipoServico,
+    tipo_servico_texto: orcamento.tipoServicoTexto,
+    responsavel: orcamento.responsavel || "beto",
+    status_evento: orcamento.statusEvento || "orcamento",
+    carne_por_pessoa_gramas: orcamento.carnePorPessoaGramas,
+    quantidade_total_carne_kg: orcamento.quantidadeTotalCarneKg,
+    quantidade_churrasqueiros: orcamento.quantidadeChurrasqueiros,
+    valor_base_churrasqueiro: orcamento.valorBaseChurrasqueiro,
+    valor_total: orcamento.valorTotal,
+    pdf_data_url: orcamento.pdfDataUrl || null,
+    pdf_nome: orcamento.pdfNome || null,
+    pdf_criado_em: orcamento.pdfCriadoEm || null,
+  };
+}
+
+function linhaParaOrcamento(linha) {
+  return {
+    id: linha.id,
+    nome: linha.nome,
+    telefone: linha.telefone || "",
+    dataEvento: linha.data_evento,
+    pessoas: Number(linha.pessoas || 0),
+    tipoServico: linha.tipo_servico,
+    tipoServicoTexto: linha.tipo_servico_texto || (linha.tipo_servico === "com_entrada" ? "Com entrada" : "Sem entrada"),
+    responsavel: linha.responsavel || "beto",
+    statusEvento: linha.status_evento || "orcamento",
+    carnePorPessoaGramas: Number(linha.carne_por_pessoa_gramas || 0),
+    quantidadeTotalCarneKg: Number(linha.quantidade_total_carne_kg || 0),
+    quantidadeChurrasqueiros: Number(linha.quantidade_churrasqueiros || 0),
+    valorBaseChurrasqueiro: Number(linha.valor_base_churrasqueiro || 0),
+    valorTotal: Number(linha.valor_total || 0),
+    criadoEm: linha.criado_em,
+    pdfDataUrl: linha.pdf_data_url || "",
+    pdfNome: linha.pdf_nome || "",
+    pdfCriadoEm: linha.pdf_criado_em || "",
   };
 }
 
@@ -507,6 +556,7 @@ export default function App() {
   const [logoDataUrl, setLogoDataUrl] = useState("");
   const [gerandoPDF, setGerandoPDF] = useState(false);
   const [enviandoWhatsApp, setEnviandoWhatsApp] = useState(false);
+  const [sincronizando, setSincronizando] = useState(false);
 
   const [agenda, setAgenda] = useState(() => {
     try {
@@ -518,6 +568,12 @@ export default function App() {
 
   useEffect(() => {
     setLogoDataUrl(localStorage.getItem(LOGO_KEY) || "");
+  }, []);
+
+  useEffect(() => {
+    if (isSupabaseConfigured && APP_ACCESS_KEY) {
+      carregarAgendaNuvem();
+    }
   }, []);
 
   useEffect(() => {
@@ -543,6 +599,29 @@ export default function App() {
       statusEvento,
     });
   }, [nome, telefone, dataEvento, pessoas, tipoServico]);
+
+  async function carregarAgendaNuvem() {
+    if (!supabase || !APP_ACCESS_KEY) return;
+
+    setSincronizando(true);
+
+    const { data, error } = await supabase
+      .from("orcamentos")
+      .select("*")
+      .eq("access_key", APP_ACCESS_KEY)
+      .order("criado_em", { ascending: false });
+
+    if (error) {
+      setMensagem("Não foi possível carregar a agenda da nuvem.");
+      setSincronizando(false);
+      return;
+    }
+
+    const lista = (data || []).map(linhaParaOrcamento);
+    setAgenda(lista);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(lista));
+    setSincronizando(false);
+  }
 
   function limparFormulario() {
     setNome("");
@@ -572,15 +651,42 @@ export default function App() {
       orcamentoComPDF = novoOrcamento;
     }
 
+    if (supabase && APP_ACCESS_KEY) {
+      const { data, error } = await supabase
+        .from("orcamentos")
+        .insert(orcamentoParaLinha(orcamentoComPDF))
+        .select()
+        .single();
+
+      if (!error && data) {
+        orcamentoComPDF = linhaParaOrcamento(data);
+      } else {
+        setMensagem("Orçamento salvo neste aparelho. Não foi possível sincronizar agora.");
+      }
+    }
+
     setOrcamentoAtual(orcamentoComPDF);
     setAgenda((listaAtual) => [orcamentoComPDF, ...listaAtual]);
     setTela("orcamento");
-    setMensagem("Orçamento criado com PDF salvo na agenda.");
+    setMensagem(supabase && APP_ACCESS_KEY ? "Orçamento salvo na nuvem." : "Orçamento criado com PDF salvo na agenda.");
   }
 
-  function excluirCliente(id) {
+  async function excluirCliente(id) {
     const confirmar = window.confirm("Deseja excluir este cliente da agenda?");
     if (!confirmar) return;
+
+    if (supabase && APP_ACCESS_KEY) {
+      const { error } = await supabase
+        .from("orcamentos")
+        .delete()
+        .eq("id", id)
+        .eq("access_key", APP_ACCESS_KEY);
+
+      if (error) {
+        setMensagem("Não foi possível excluir da nuvem.");
+        return;
+      }
+    }
 
     setAgenda((listaAtual) => listaAtual.filter((item) => item.id !== id));
     if (clienteSelecionado?.id === id) setClienteSelecionado(null);
@@ -671,10 +777,26 @@ export default function App() {
       // Se não conseguir recriar o PDF agora, mantém os dados atualizados.
     }
 
+    if (supabase && APP_ACCESS_KEY) {
+      const { data, error } = await supabase
+        .from("orcamentos")
+        .update(orcamentoParaLinha(atualizado))
+        .eq("id", id)
+        .eq("access_key", APP_ACCESS_KEY)
+        .select()
+        .single();
+
+      if (!error && data) {
+        atualizado = linhaParaOrcamento(data);
+      } else {
+        setMensagem("Cliente atualizado neste aparelho. Não foi possível sincronizar agora.");
+      }
+    }
+
     setAgenda((listaAtual) => listaAtual.map((item) => (item.id === id ? atualizado : item)));
     if (clienteSelecionado?.id === id) setClienteSelecionado(atualizado);
     if (orcamentoAtual?.id === id) setOrcamentoAtual(atualizado);
-    setMensagem("Cliente atualizado.");
+    setMensagem(supabase && APP_ACCESS_KEY ? "Cliente atualizado na nuvem." : "Cliente atualizado.");
   }
 
   async function alternarStatusCliente(cliente) {
@@ -731,6 +853,19 @@ export default function App() {
                 <ClipboardList className="w-4" /> Agenda
               </button>
             </nav>
+
+            <div className="flex w-full flex-col gap-2 md:col-span-2 md:flex-row md:items-center md:justify-between">
+              <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-xs font-black uppercase tracking-wide text-stone-300">
+                {isSupabaseConfigured && APP_ACCESS_KEY ? <Cloud className="w-4 text-[#ca9e42]" /> : <WifiOff className="w-4 text-stone-500" />}
+                {isSupabaseConfigured && APP_ACCESS_KEY ? (sincronizando ? "Sincronizando..." : "Agenda na nuvem") : "Agenda local"}
+              </div>
+
+              {isSupabaseConfigured && APP_ACCESS_KEY && (
+                <Button type="button" variant="ghost" icon={RefreshCcw} className="py-3 text-xs md:max-w-xs" onClick={carregarAgendaNuvem} disabled={sincronizando}>
+                  Atualizar agenda
+                </Button>
+              )}
+            </div>
           </div>
         </header>
 

@@ -13,6 +13,8 @@ import {
   Flame,
   MessageCircle,
   Phone,
+  Pencil,
+  Save,
   Sparkles,
   Trash2,
   Users,
@@ -387,6 +389,21 @@ function InputBase(props) {
   );
 }
 
+function SelectBase({ children, ...props }) {
+  return (
+    <select
+      {...props}
+      className={cn(
+        "w-full rounded-2xl border border-white/10 bg-[#101010]/90 px-4 py-4 text-base text-white outline-none transition duration-300",
+        "focus:border-[#a17423] focus:bg-black focus:shadow-[0_0_1.4rem_rgba(161,116,35,0.18)]",
+        props.className
+      )}
+    >
+      {children}
+    </select>
+  );
+}
+
 function Card({ children, destaque = false, className = "" }) {
   return (
     <div
@@ -617,6 +634,58 @@ export default function App() {
     }
   }
 
+
+  async function atualizarCliente(id, dados) {
+    const original = agenda.find((item) => item.id === id) || clienteSelecionado;
+    if (!original) return;
+
+    if (!String(dados.nome || "").trim()) {
+      setMensagem("Informe o nome do cliente.");
+      return;
+    }
+
+    if (!Number(dados.pessoas) || Number(dados.pessoas) < 1) {
+      setMensagem("Informe a quantidade de pessoas.");
+      return;
+    }
+
+    let atualizado = {
+      ...original,
+      ...calcularOrcamento({
+        nome: dados.nome,
+        telefone: dados.telefone || "",
+        dataEvento: dados.dataEvento || "",
+        pessoas: dados.pessoas,
+        tipoServico: dados.tipoServico || "com_entrada",
+        responsavel: dados.responsavel || "beto",
+        statusEvento: dados.statusEvento || "orcamento",
+      }),
+      id: original.id,
+      criadoEm: original.criadoEm,
+    };
+
+    try {
+      const pdfInterno = await criarPDFInterno(atualizado, logoDataUrl);
+      atualizado = { ...atualizado, ...pdfInterno };
+    } catch {
+      // Se não conseguir recriar o PDF agora, mantém os dados atualizados.
+    }
+
+    setAgenda((listaAtual) => listaAtual.map((item) => (item.id === id ? atualizado : item)));
+    if (clienteSelecionado?.id === id) setClienteSelecionado(atualizado);
+    if (orcamentoAtual?.id === id) setOrcamentoAtual(atualizado);
+    setMensagem("Cliente atualizado.");
+  }
+
+  async function alternarStatusCliente(cliente) {
+    if (!cliente) return;
+
+    await atualizarCliente(cliente.id, {
+      ...cliente,
+      statusEvento: cliente.statusEvento === "data_fechada" ? "orcamento" : "data_fechada",
+    });
+  }
+
   return (
     <main className="min-h-screen w-full bg-[#070707] text-stone-100">
       {showSplash && <SplashScreen logoDataUrl={logoDataUrl} onFinish={() => setShowSplash(false)} />}
@@ -821,9 +890,9 @@ export default function App() {
           {tela === "agenda" && (
             <div className="lg:col-span-2">
               {clienteSelecionado ? (
-                <ClienteDetalhes cliente={clienteSelecionado} onVoltar={() => setClienteSelecionado(null)} onExcluir={() => excluirCliente(clienteSelecionado.id)} onPDF={() => gerarPDF(clienteSelecionado)} onWhatsApp={() => enviarWhatsApp(clienteSelecionado)} gerandoPDF={gerandoPDF} enviandoWhatsApp={enviandoWhatsApp} />
+                <ClienteDetalhes cliente={clienteSelecionado} onVoltar={() => setClienteSelecionado(null)} onExcluir={() => excluirCliente(clienteSelecionado.id)} onEditar={atualizarCliente} onAlternarStatus={() => alternarStatusCliente(clienteSelecionado)} onPDF={() => gerarPDF(clienteSelecionado)} onWhatsApp={() => enviarWhatsApp(clienteSelecionado)} gerandoPDF={gerandoPDF} enviandoWhatsApp={enviandoWhatsApp} />
               ) : (
-                <AgendaLista agenda={agenda} onVisualizar={setClienteSelecionado} onExcluir={excluirCliente} />
+                <AgendaLista agenda={agenda} onVisualizar={setClienteSelecionado} onExcluir={excluirCliente} onAlternarStatus={alternarStatusCliente} />
               )}
             </div>
           )}
@@ -903,7 +972,7 @@ function OrcamentoResultado({ orcamento, onPDF, onWhatsApp, gerandoPDF, enviando
   );
 }
 
-function AgendaLista({ agenda, onVisualizar, onExcluir }) {
+function AgendaLista({ agenda, onVisualizar, onExcluir, onAlternarStatus }) {
   return (
     <Card destaque>
       <div className="mb-5 flex w-full flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -967,9 +1036,12 @@ function AgendaLista({ agenda, onVisualizar, onExcluir }) {
               <FileText className="w-4 text-[#ca9e42]" /> {cliente.pdfDataUrl ? "PDF salvo" : "PDF pendente"}
             </span>
 
-            <div className="grid w-full grid-cols-2 gap-2">
+            <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-3">
               <Button type="button" icon={Eye} className="py-3 text-xs" onClick={() => onVisualizar(cliente)}>
                 Visualizar
+              </Button>
+              <Button type="button" variant={cliente.statusEvento === "data_fechada" ? "ghost" : "secondary"} icon={CheckCircle2} className="py-3 text-xs" onClick={() => onAlternarStatus(cliente)}>
+                {cliente.statusEvento === "data_fechada" ? "Voltar orçamento" : "Fechar data"}
               </Button>
               <Button type="button" variant="danger" icon={Trash2} className="py-3 text-xs" onClick={() => onExcluir(cliente.id)}>
                 Excluir
@@ -982,7 +1054,107 @@ function AgendaLista({ agenda, onVisualizar, onExcluir }) {
   );
 }
 
-function ClienteDetalhes({ cliente, onVoltar, onExcluir, onPDF, onWhatsApp, gerandoPDF, enviandoWhatsApp }) {
+function EditClienteForm({ cliente, onCancelar, onSalvar }) {
+  const [form, setForm] = useState({
+    nome: cliente.nome || "",
+    telefone: cliente.telefone || "",
+    dataEvento: cliente.dataEvento || "",
+    pessoas: String(cliente.pessoas || ""),
+    tipoServico: cliente.tipoServico || "com_entrada",
+    responsavel: cliente.responsavel || "beto",
+    statusEvento: cliente.statusEvento || "orcamento",
+  });
+
+  function alterar(campo, valor) {
+    setForm((atual) => ({ ...atual, [campo]: valor }));
+  }
+
+  return (
+    <div className="mx-auto grid w-full max-w-3xl grid-cols-1 gap-5">
+      <Button type="button" variant="ghost" icon={ArrowLeft} onClick={onCancelar}>
+        Cancelar edição
+      </Button>
+
+      <Card destaque>
+        <div className="mb-5">
+          <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-[#ca9e42]">
+            <Pencil className="w-4" /> Editar cliente e orçamento
+          </p>
+          <h2 className="mt-2 text-3xl font-black text-white">{cliente.nome}</h2>
+          <p className="mt-2 text-sm text-stone-400">
+            Altere os dados e salve. O valor e o PDF serão recalculados automaticamente.
+          </p>
+        </div>
+
+        <div className="grid w-full grid-cols-1 gap-4">
+          <Field label="Nome do cliente" icon={Users}>
+            <InputBase value={form.nome} onChange={(e) => alterar("nome", e.target.value)} />
+          </Field>
+
+          <Field label="WhatsApp" icon={Phone}>
+            <InputBase value={form.telefone} onChange={(e) => alterar("telefone", mascaraTelefone(e.target.value))} inputMode="tel" />
+          </Field>
+
+          <Field label="Data do evento" icon={CalendarDays}>
+            <InputBase value={form.dataEvento} onChange={(e) => alterar("dataEvento", e.target.value)} type="date" />
+          </Field>
+
+          <Field label="Quantidade de pessoas" icon={Users}>
+            <InputBase value={form.pessoas} onChange={(e) => alterar("pessoas", e.target.value)} type="number" min="1" inputMode="numeric" />
+          </Field>
+
+          <Field label="Tipo de serviço" icon={Beef}>
+            <SelectBase value={form.tipoServico} onChange={(e) => alterar("tipoServico", e.target.value)}>
+              <option value="com_entrada">Com entrada - 400g por pessoa</option>
+              <option value="sem_entrada">Sem entrada - 300g por pessoa</option>
+            </SelectBase>
+          </Field>
+
+          <Field label="Churrasqueiro responsável" icon={ChefHat}>
+            <SelectBase value={form.responsavel} onChange={(e) => alterar("responsavel", e.target.value)}>
+              <option value="beto">Beto</option>
+              <option value="mano">Mano</option>
+              <option value="ambos">Beto e Mano</option>
+            </SelectBase>
+          </Field>
+
+          <Field label="Status do evento" icon={ClipboardList}>
+            <SelectBase value={form.statusEvento} onChange={(e) => alterar("statusEvento", e.target.value)}>
+              <option value="orcamento">Orçamento</option>
+              <option value="data_fechada">Data fechada</option>
+            </SelectBase>
+          </Field>
+
+          <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
+            <Button type="button" icon={Save} onClick={() => onSalvar(form)}>
+              Salvar alterações
+            </Button>
+            <Button type="button" variant="ghost" icon={X} onClick={onCancelar}>
+              Cancelar
+            </Button>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function ClienteDetalhes({ cliente, onVoltar, onExcluir, onEditar, onAlternarStatus, onPDF, onWhatsApp, gerandoPDF, enviandoWhatsApp }) {
+  const [editando, setEditando] = useState(false);
+
+  if (editando) {
+    return (
+      <EditClienteForm
+        cliente={cliente}
+        onCancelar={() => setEditando(false)}
+        onSalvar={async (dados) => {
+          await onEditar(cliente.id, dados);
+          setEditando(false);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="mx-auto grid w-full max-w-3xl grid-cols-1 gap-5">
       <Button type="button" variant="ghost" icon={ArrowLeft} onClick={onVoltar}>
@@ -1016,14 +1188,20 @@ function ClienteDetalhes({ cliente, onVoltar, onExcluir, onPDF, onWhatsApp, gera
           <LinhaResumo icon={Wallet} label="Valor total" valor={formatarMoeda(cliente.valorTotal)} />
         </div>
 
-        <div className="mt-5 grid w-full grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="mt-5 grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
+          <Button type="button" icon={Pencil} onClick={() => setEditando(true)}>
+            Editar cliente
+          </Button>
+          <Button type="button" variant={cliente.statusEvento === "data_fechada" ? "ghost" : "secondary"} icon={CheckCircle2} onClick={onAlternarStatus}>
+            {cliente.statusEvento === "data_fechada" ? "Voltar para orçamento" : "Marcar data fechada"}
+          </Button>
           <Button type="button" icon={Download} onClick={onPDF} disabled={gerandoPDF || enviandoWhatsApp}>
             {gerandoPDF ? "Preparando..." : "Baixar PDF"}
           </Button>
           <Button type="button" variant="secondary" icon={MessageCircle} onClick={onWhatsApp} disabled={gerandoPDF || enviandoWhatsApp}>
             {enviandoWhatsApp ? "Abrindo..." : "WhatsApp"}
           </Button>
-          <Button type="button" variant="danger" icon={Trash2} onClick={onExcluir}>
+          <Button type="button" variant="danger" icon={Trash2} onClick={onExcluir} className="sm:col-span-2">
             Excluir cliente
           </Button>
         </div>

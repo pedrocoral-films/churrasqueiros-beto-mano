@@ -27,8 +27,6 @@ import {
 import LOGO_URL from "./assets/logo-beto-e-mano.png";
 import { supabase, isSupabaseConfigured, APP_ACCESS_KEY } from "./supabaseClient";
 
-const STORAGE_KEY = "app_churrasqueiros_agenda";
-const LOGO_KEY = "app_churrasqueiros_logo";
 const EMPRESA = "OS CHURRASQUEIROS BETO E MANO";
 const VALOR_BASE_CHURRASQUEIRO = 350;
 
@@ -558,27 +556,19 @@ export default function App() {
   const [enviandoWhatsApp, setEnviandoWhatsApp] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
 
-  const [agenda, setAgenda] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-    } catch {
-      return [];
+  const [agenda, setAgenda] = useState([]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !APP_ACCESS_KEY || !supabase) {
+      console.error(
+        "[Supabase] Configuração ausente. Confira VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY e VITE_APP_ACCESS_KEY."
+      );
+      setMensagem("A conexão com a nuvem não está configurada.");
+      return;
     }
-  });
 
-  useEffect(() => {
-    setLogoDataUrl(localStorage.getItem(LOGO_KEY) || "");
+    carregarAgendaNuvem();
   }, []);
-
-  useEffect(() => {
-    if (isSupabaseConfigured && APP_ACCESS_KEY) {
-      carregarAgendaNuvem();
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(agenda));
-  }, [agenda]);
 
   useEffect(() => {
     if (!mensagem) return;
@@ -601,26 +591,34 @@ export default function App() {
   }, [nome, telefone, dataEvento, pessoas, tipoServico]);
 
   async function carregarAgendaNuvem() {
-    if (!supabase || !APP_ACCESS_KEY) return;
-
-    setSincronizando(true);
-
-    const { data, error } = await supabase
-      .from("orcamentos")
-      .select("*")
-      .eq("access_key", APP_ACCESS_KEY)
-      .order("criado_em", { ascending: false });
-
-    if (error) {
-      setMensagem("Não foi possível carregar a agenda da nuvem.");
-      setSincronizando(false);
+    if (!supabase || !APP_ACCESS_KEY) {
+      console.error("[Supabase] Cliente ou chave interna não configurados.");
+      setMensagem("A conexão com a nuvem não está configurada.");
       return;
     }
 
-    const lista = (data || []).map(linhaParaOrcamento);
-    setAgenda(lista);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(lista));
-    setSincronizando(false);
+    setSincronizando(true);
+
+    try {
+      const { data, error } = await supabase
+        .from("orcamentos")
+        .select("*")
+        .eq("access_key", APP_ACCESS_KEY)
+        .order("criado_em", { ascending: false });
+
+      if (error) {
+        console.error("[Supabase] Erro ao carregar a agenda:", error);
+        setMensagem("Não foi possível carregar a agenda da nuvem.");
+        return;
+      }
+
+      setAgenda((data || []).map(linhaParaOrcamento));
+    } catch (error) {
+      console.error("[Supabase] Falha inesperada ao carregar a agenda:", error);
+      setMensagem("Não foi possível carregar a agenda da nuvem.");
+    } finally {
+      setSincronizando(false);
+    }
   }
 
   function limparFormulario() {
@@ -651,41 +649,78 @@ export default function App() {
       orcamentoComPDF = novoOrcamento;
     }
 
-    if (supabase && APP_ACCESS_KEY) {
+    if (!supabase || !APP_ACCESS_KEY) {
+      console.error("[Supabase] Não foi possível salvar: configuração da nuvem ausente.");
+      setMensagem("Não foi possível salvar. A conexão com a nuvem não está configurada.");
+      return;
+    }
+
+    try {
       const { data, error } = await supabase
         .from("orcamentos")
         .insert(orcamentoParaLinha(orcamentoComPDF))
         .select()
         .single();
 
-      if (!error && data) {
-        orcamentoComPDF = linhaParaOrcamento(data);
-      } else {
-        setMensagem("Orçamento salvo neste aparelho. Não foi possível sincronizar agora.");
+      if (error) {
+        console.error("[Supabase] Erro ao salvar o orçamento:", error);
+        setMensagem("Não foi possível salvar o orçamento na nuvem.");
+        return;
       }
+
+      if (!data) {
+        console.error("[Supabase] O INSERT não retornou o registro salvo.");
+        setMensagem("Não foi possível confirmar o salvamento na nuvem.");
+        return;
+      }
+
+      orcamentoComPDF = linhaParaOrcamento(data);
+    } catch (error) {
+      console.error("[Supabase] Falha inesperada ao salvar o orçamento:", error);
+      setMensagem("Não foi possível salvar o orçamento na nuvem.");
+      return;
     }
 
     setOrcamentoAtual(orcamentoComPDF);
     setAgenda((listaAtual) => [orcamentoComPDF, ...listaAtual]);
     setTela("orcamento");
-    setMensagem(supabase && APP_ACCESS_KEY ? "Orçamento salvo na nuvem." : "Orçamento criado com PDF salvo na agenda.");
+    setMensagem("Orçamento salvo na nuvem.");
   }
 
   async function excluirCliente(id) {
     const confirmar = window.confirm("Deseja excluir este cliente da agenda?");
     if (!confirmar) return;
 
-    if (supabase && APP_ACCESS_KEY) {
-      const { error } = await supabase
+    if (!supabase || !APP_ACCESS_KEY) {
+      console.error("[Supabase] Não foi possível excluir: configuração da nuvem ausente.");
+      setMensagem("Não foi possível excluir. A conexão com a nuvem não está configurada.");
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
         .from("orcamentos")
         .delete()
         .eq("id", id)
-        .eq("access_key", APP_ACCESS_KEY);
+        .eq("access_key", APP_ACCESS_KEY)
+        .select("id")
+        .single();
 
       if (error) {
+        console.error("[Supabase] Erro ao excluir o cliente:", error);
         setMensagem("Não foi possível excluir da nuvem.");
         return;
       }
+
+      if (!data) {
+        console.error("[Supabase] O DELETE não retornou o registro excluído.");
+        setMensagem("Não foi possível confirmar a exclusão na nuvem.");
+        return;
+      }
+    } catch (error) {
+      console.error("[Supabase] Falha inesperada ao excluir o cliente:", error);
+      setMensagem("Não foi possível excluir da nuvem.");
+      return;
     }
 
     setAgenda((listaAtual) => listaAtual.filter((item) => item.id !== id));
@@ -701,15 +736,13 @@ export default function App() {
     leitor.onload = () => {
       const resultado = String(leitor.result || "");
       setLogoDataUrl(resultado);
-      localStorage.setItem(LOGO_KEY, resultado);
-      setMensagem("Logo personalizada salva.");
+      setMensagem("Logo personalizada aplicada nesta sessão.");
     };
     leitor.readAsDataURL(arquivo);
   }
 
   function removerLogo() {
     setLogoDataUrl("");
-    localStorage.removeItem(LOGO_KEY);
     setMensagem("Logo padrão restaurada.");
   }
 
@@ -777,7 +810,13 @@ export default function App() {
       // Se não conseguir recriar o PDF agora, mantém os dados atualizados.
     }
 
-    if (supabase && APP_ACCESS_KEY) {
+    if (!supabase || !APP_ACCESS_KEY) {
+      console.error("[Supabase] Não foi possível atualizar: configuração da nuvem ausente.");
+      setMensagem("Não foi possível atualizar. A conexão com a nuvem não está configurada.");
+      return;
+    }
+
+    try {
       const { data, error } = await supabase
         .from("orcamentos")
         .update(orcamentoParaLinha(atualizado))
@@ -786,17 +825,29 @@ export default function App() {
         .select()
         .single();
 
-      if (!error && data) {
-        atualizado = linhaParaOrcamento(data);
-      } else {
-        setMensagem("Cliente atualizado neste aparelho. Não foi possível sincronizar agora.");
+      if (error) {
+        console.error("[Supabase] Erro ao atualizar o cliente:", error);
+        setMensagem("Não foi possível atualizar o cliente na nuvem.");
+        return;
       }
+
+      if (!data) {
+        console.error("[Supabase] O UPDATE não retornou o registro atualizado.");
+        setMensagem("Não foi possível confirmar a atualização na nuvem.");
+        return;
+      }
+
+      atualizado = linhaParaOrcamento(data);
+    } catch (error) {
+      console.error("[Supabase] Falha inesperada ao atualizar o cliente:", error);
+      setMensagem("Não foi possível atualizar o cliente na nuvem.");
+      return;
     }
 
     setAgenda((listaAtual) => listaAtual.map((item) => (item.id === id ? atualizado : item)));
     if (clienteSelecionado?.id === id) setClienteSelecionado(atualizado);
     if (orcamentoAtual?.id === id) setOrcamentoAtual(atualizado);
-    setMensagem(supabase && APP_ACCESS_KEY ? "Cliente atualizado na nuvem." : "Cliente atualizado.");
+    setMensagem("Cliente atualizado na nuvem.");
   }
 
   async function alternarStatusCliente(cliente) {
@@ -842,6 +893,7 @@ export default function App() {
                 onClick={() => {
                   setTela("agenda");
                   setClienteSelecionado(null);
+                  carregarAgendaNuvem();
                 }}
                 className={cn(
                   "flex w-full items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm font-black uppercase tracking-wide transition duration-300",
@@ -857,7 +909,11 @@ export default function App() {
             <div className="flex w-full flex-col gap-2 md:col-span-2 md:flex-row md:items-center md:justify-between">
               <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/25 px-4 py-3 text-xs font-black uppercase tracking-wide text-stone-300">
                 {isSupabaseConfigured && APP_ACCESS_KEY ? <Cloud className="w-4 text-[#ca9e42]" /> : <WifiOff className="w-4 text-stone-500" />}
-                {isSupabaseConfigured && APP_ACCESS_KEY ? (sincronizando ? "Sincronizando..." : "Agenda na nuvem") : "Agenda local"}
+                {isSupabaseConfigured && APP_ACCESS_KEY
+                  ? sincronizando
+                    ? "Sincronizando..."
+                    : "Agenda na nuvem"
+                  : "Nuvem não configurada"}
               </div>
 
               {isSupabaseConfigured && APP_ACCESS_KEY && (
